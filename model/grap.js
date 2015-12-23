@@ -14,13 +14,14 @@ let url = {
 let GrapCateg = {
     url: url.course,
     flag: 0, //获取插入记录的数量
+    childrenFlag: 0, //children的flags标记
     //获取第一级目录内容
     sendReq(url) { //发送指定路由，并返回解析后的网页$;
         var deferred = Q.defer();
         sup.get(url)
             .end((err, res) => {
                 if (err) {
-                    html = "the url doesn't work";
+                    console.log("the url doesn't work");
                     return;
                 }
                 let $ = cheerio.load(res.text);
@@ -36,13 +37,14 @@ let GrapCateg = {
                 items = $('.g-sort li a'); //找到所有的lis
                 //删除第一个li"全部"的内容;
                 items.eq(0).remove();
-                GrapCateg.flag = items.length;
+                this.flag = items.length;
                 //遍历其他目录
-                GrapCateg.insertCate(items); //插入数据
+                this.insertCate(items); //插入数据
             })
     },
     // 查询子层目录
     getOthersCate() {
+        let children = [];  //先置空
         post.getTitles()
             .then((docs) => {
                 if (!docs) {
@@ -51,22 +53,39 @@ let GrapCateg = {
                 }
                 for (var item of docs) { //获得所有的children的titles和href
                     for (var data of item.children) {
-                        let items;
-                        GrapCateg.sendReq(data.href)
-                            .then(($) => {
-                                if ($('.g-sort').length === 0) {  //如果没有子类的话，则开始查找该类下的课程信息
-                                    return;
-                                }
-                                 items = $('.g-sort li a'); //找到所有的lis
-                                //删除第一个li"全部"的内容;
-                                items.eq(0).remove();
-                                GrapCateg.flag = items.length;
-                                //遍历其他目录
-                                GrapCateg.insertCate(items); //插入数据
-                            })
+                        children.push(data);
                     }
                 }
+                this.flag = children.length;
+                this.recurReq(children);
             })
+    },
+    //递归发送请求
+    recurReq(children) {
+        if(this.flag!=0){
+             this.flag--;
+            let href = children[this.flag].href,   
+                items;
+            this.sendReq(href)
+                .then(($)=>{
+                     if ($('.g-sort').length === 0) { //如果不存在children
+                        var num = $('.keyword em').html();
+                         this.recurReq(children);      
+                        return;
+                    }
+                     items = $('.g-sort li a'); //找到所有的lis
+                    //删除第一个li"全部"的内容;
+                    items.eq(0).remove();
+                    this.flag = items.length;
+                    //遍历其他目录
+                    this.insertCate(items); //插入数据
+                    this.recurReq(children);           
+                })
+
+        }else{
+            return;
+        }
+
     },
     //递归插入数据
     insertCate(items) {
@@ -94,7 +113,7 @@ let GrapCateg = {
                 .then((children) => {
                     //将绑定子节点,以数组的方式放入，如果子节点里面含有其他的话需要加上上一级
                     // 的title. ex: 外语其他,金融其他等等
-                    if(children){
+                    if (children) {
                         cate.children = children;
                     }
                     return;
@@ -124,8 +143,8 @@ let GrapCateg = {
             items;
         this.sendReq(cate.href)
             .then(($) => {
-                if ($('.g-sort').length === 0) {  //如果不存在children
-                     deferred.resolve(false);
+                if ($('.g-sort').length === 0) { //如果不存在children
+                    deferred.resolve(false);
                     return;
                 }
                 items = $('.g-sort li a'); //找到所有的lis
