@@ -2,15 +2,18 @@
 let sup = require('superagent'),
     post = require('./post'),
     cheerio = require('cheerio'),
+    eventproxy = require('eventproxy'), //并发监听请求
     Q = require('Q'),
+    async = require('async'),
     escaper = require("true-html-escape"); //解码工具库
 let url = {
-        course: 'http://www.chuanke.com/course/index.html' //主页路由
+        course: 'http://www.chuanke.com/course/index.html', //主页路由
+        index:'http://www.chuanke.com/'
     }
     /*
      * @function: 获取对应需要的目录内容，并返回处理后的html_String 
      */
-
+const interval = 1000;
 let GrapCateg = {
     url: url.course,
     flag: 0, //获取插入记录的数量
@@ -29,6 +32,13 @@ let GrapCateg = {
             })
         return deferred.promise;
     },
+    sleep(millis) { //睡眠函数
+        var deferredResult = Q.defer();
+        setTimeout(function() {
+            deferredResult.resolve();
+        }, millis);
+        return deferredResult.promise;
+    },
     //得到一级目录
     getFirsetCate() {
         let items;
@@ -44,7 +54,8 @@ let GrapCateg = {
     },
     // 查询子层目录
     getOthersCate() {
-        let children = [];  //先置空
+        let children = [], //先置空
+            ep = new eventproxy();
         post.getTitles()
             .then((docs) => {
                 if (!docs) {
@@ -57,37 +68,99 @@ let GrapCateg = {
                     }
                 }
                 this.flag = children.length;
-                this.recurReq(children);
+                //发送请求
+                async.mapLimit(children, 1, (url, callback) => {
+                        let href = url.href;
+                        sup.get(href)
+                            .end((err, res) => {
+                                if (err) {
+                                    console.log("the url doesn't work");
+                                    return;
+                                }
+                                let $ = cheerio.load(res.text),
+                                    items = $('.g-sort li a'); //找到所有的lis
+
+                                if (items.html()) { //如果为最后一层的话
+                                    //删除第一个li"全部"的内容;
+                                    items.eq(0).remove();
+                                    this.flag = items.length;
+                                    //遍历其他目录
+                                    this.insertCate(items); //插入数据
+                                }
+                                setTimeout(function() {
+                                    callback(null, null);
+                                }, interval);
+                            })
+
+                    },
+                    function(err, result) {
+
+                    });
+
+                //发送html内容
+
             })
     },
-    //递归发送请求
-    recurReq(children) {
-        if(this.flag!=0){
-             this.flag--;
-            let href = children[this.flag].href,   
-                items;
-            this.sendReq(href)
-                .then(($)=>{
-                     if ($('.g-sort').length === 0) { //如果不存在children
-                        var num = $('.keyword em').html();
-                         this.recurReq(children);      
-                        return;
-                    }
-                     items = $('.g-sort li a'); //找到所有的lis
-                    //删除第一个li"全部"的内容;
-                    items.eq(0).remove();
-                    this.flag = items.length;
-                    //遍历其他目录
-                    this.insertCate(items); //插入数据
-                    this.recurReq(children);           
-                })
+    grapAllHrefs(){
+        this.sendReq(url.index)
+            .then(($)=>{
+                var all =$(".mn_mc .categ_m a"),  //获取所有的atitle类型
+                    data = [];
 
-        }else{
-            return;
-        }
-
+                for(var i = 0;i<all.length;i++){
+                    let target = all.eq(i);
+                    data.push({
+                        title:escaper.unescape(target.html().trim()),  //titles
+                        href:target.attr('href')  //链接
+                    })
+                }
+                console.log(data);
+                post.saveHref(data)
+                    .then(()=>{
+                        console.log("ok");
+                    })
+                
+            })
+    },
+    //获取连接数
+    getAll() {
+        post.getAllHrefs()
+            .then((docs) => {
+                async.mapLimit(docs, 1, (url, callback) => {
+                        let href = url.href;
+                        let cate = new Object(),
+                            item,
+                            date = this.dealDate(new Date());
+                        cate.title = url.title;
+                        cate.date = date,
+                            cate.href = href;
+                        this.findChildren(cate)
+                            .then((children) => {
+                                if (children) {
+                                    cate.children = children;
+                                }
+                                return;
+                            })
+                            .then(() => {
+                                console.log(cate.num);
+                                post.save(cate)
+                                    .then((flag) => {
+                                        if (flag) {
+                                            console.log("插入成功~");
+                                        } else {
+                                            console.log("更新成功~");
+                                        }
+                                        setTimeout(function() {
+                                            callback(null, null);
+                                        }, interval);
+                                    })
+                            })
+                    },
+                    function(err, result) {});
+            })
     },
     //递归插入数据
+    // @items: 是页面上含有g-sort的分类标题, type: a标签
     insertCate(items) {
         /*
          * 每个文档的数据应该为
@@ -122,11 +195,16 @@ let GrapCateg = {
                     post.save(cate)
                         .then((flag) => {
                             if (flag) {
-                                GrapCateg.insertCate(items);
-                                console.log("插入成功~");
+                                this.sleep(interval).then(() => { //睡眠1s
+                                    console.log("插入成功~");
+                                    GrapCateg.insertCate(items);
+                                })
+
                             } else {
-                                GrapCateg.insertCate(items);
-                                console.log("更新成功~");
+                                this.sleep(interval).then(() => {
+                                    console.log("更新成功~");
+                                    GrapCateg.insertCate(items);
+                                })
                             }
                         })
                     return;
@@ -141,12 +219,15 @@ let GrapCateg = {
         var deferred = Q.defer(),
             children = [],
             items;
+        console.log(cate.href);
         this.sendReq(cate.href)
             .then(($) => {
-                if ($('.g-sort').length === 0) { //如果不存在children
+                cate.num = $('.search-crumb .keyword').find('em').html();
+                if ($('.g-sort').length === 0) { //如果不存在children,则直接返回
                     deferred.resolve(false);
                     return;
                 }
+               
                 items = $('.g-sort li a'); //找到所有的lis
                 //删除第一个li"全部"的内容;
                 for (var i = 1; i < items.length; i++) {
@@ -173,7 +254,9 @@ let GrapCateg = {
     },
     init() {
         // this.getFirsetCate();  //获取第一级目录
-        this.getOthersCate();
+        // this.getOthersCate(); //获取其他层目录, 刷过第一遍后，(或者说,刷过很多遍后，才能用下面的刷)
+        this.getAll();  //遍历目录重新查询
+        // this.grapAllHrefs();  //获取所有的连接，并且放入到hrefs collection中
     }
 }
 GrapCateg.init();
