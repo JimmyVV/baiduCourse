@@ -27,7 +27,10 @@ function getContent(order, res) {
             let $ = cheerio.load(sres.text);
             html = $('.mn_mc .item').eq(order - 1) //找到.mn_mc下第n个item
                 .find('.categ_m');
-            changeSrc(html.find("a"));
+            let As = html.find('a');
+            for(var i=0;i<As.length;i++){
+                changeSrc(As.eq(i));    
+            }
             deferred.resolve(html.html()); //获取该item下的.categ_m的html内容;
         });
     return deferred.promise;
