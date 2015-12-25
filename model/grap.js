@@ -619,16 +619,16 @@ let GrapCateg = {
     },
     init() {
         /*
-         * 爬数据顺序1. this.grapAllHrefs()-> 2. this.getAll()->3. this.getThirdRate()->4. this.dealThirdRateDate()->5. this.calcuThirdRate()
+         * 爬数据顺序（1. this.grapAllHrefs() )-> 2. this.getAll()->3. this.getThirdRate()->4. this.dealThirdRateDate()->5. this.calcuThirdRate()
          * -> this.dealCate2() -> this.dealCate1();
          */
         // this.getAll(); //遍历目录重新查询 
         // this.grapAllHrefs();  //分类获取所有的链接,一共有3级目录
-        // this.getThirdRate(); //获得第三级目录
+        this.getThirdRate(); //获得第三级目录
         // this.dealThirdRateDate();  //处理三级目录的数据
         // this.calcuThirdRate(); //给今天的第三级目录加上,上架课程，下架课程数
         // this.dealCate2();  //处理二级目录
-        this.dealCate1(); //处理一级目录数据
+        // this.dealCate1(); //处理一级目录数据
     }
 }
 
